@@ -1,281 +1,202 @@
 #include <iostream>
-#include <ctime>
 #include <vector>
-#include <cmath>
+#include <cstdlib>
+#include <ctime>
 #include <algorithm>
-#include <random>
-#include <queue>
-#include <fstream>
+#include <limits>
+#include <cmath>
 
-std::mt19937 gen(time(nullptr));
+const double INF = std::numeric_limits<double>::infinity();
+using namespace std;
 
-class Node {
+struct Vertex {
+    vector<double> coordinates;
+    Vertex(const vector<double> &coords) : coordinates(coords) {}
+};
+
+class Graph {
 private:
-    int idx;
-    std::vector<double> value;
-    std::vector<int> neighborhood;
+    int numVertices; // Количество вершин
+    int dimension;   // Размерность пространства
+    vector<Vertex> vertices; // Вершины с координатами
+    vector<vector<int>> adjacencyList; // Список смежности для ребер
 
 public:
-    Node(int idx, const std::vector<double>& value) : idx(idx), value(value) {};
-
-    int get_idx() const {
-        return idx;
+    Graph(int numVertices, int dimension) : numVertices(numVertices), dimension(dimension) {
+        adjacencyList.resize(numVertices);
     }
 
-    const std::vector<double>& get_value() const {
-        return value;
+    void addEdge(int from, int to) {
+        adjacencyList[from].push_back(to);
+        adjacencyList[to].push_back(from);
     }
 
-    const std::vector<int>& get_neighborhood() const {
-        return neighborhood;
+    void addVertex(const vector<double> &coordinates) {
+        vertices.push_back(Vertex(coordinates));
     }
 
-    void add_to_neighborhood(int neighborIndex) {
-        neighborhood.push_back(neighborIndex);
+    vector<int> getFriends(int vertex) const {
+        return adjacencyList[vertex];
+    }
+
+
+    double distance(const vector<double> &query, const vector<double> &vertex_point) {
+        double dist = 0;
+        for (int i = 0; i < query.size(); i++) {
+            dist += pow(query[i] - vertex_point[i], 2);
+        }
+        return sqrt(dist); //
+    }
+
+    int Greedy_search(int query, int venter_point) {
+        int vcurr = venter_point;
+        double dmin = distance(vertices[query].coordinates, vertices[vcurr].coordinates);
+        int vnext = -1;
+        for (int vfriend: getFriends(vcurr)) {// изменить на this->
+            double dist = distance(vertices[query].coordinates, vertices[vfriend].coordinates);
+            if (dist < dmin) {
+                dmin = dist;
+                vnext = vfriend;
+            }
+        }
+        if (vnext == -1) {
+            return vcurr;
+        } else {
+            return Greedy_search(query, vnext);
+        }
+    }
+
+    int getRandomEnterPoint() {
+        return rand() % (numVertices);
+    }
+
+    vector<int> Multi_Search(int query, int m) {
+        vector<int> results;
+        for (int i = 0; i < m; i++) {
+            int enter_point = getRandomEnterPoint();
+            int local_min = Greedy_search(query, enter_point);
+            if (find(results.begin(), results.end(), local_min) == results.end()) {
+                results.push_back(local_min);
+            }
+        }
+        return results;
+    }
+
+    int Get_Best_Element(int q, const vector<int>& objects) {
+        double d_min = INF;
+        int obj_best = -1;
+        for (int obj: objects) {
+            double dist = distance(vertices[q].coordinates, vertices[obj].coordinates);
+            if (dist < d_min) {
+                obj_best = obj;
+                d_min = dist;
+            }
+        }
+        return obj_best;
+    }
+
+    void Nearest_Neighbor_Add(int new_object, int l, int init_attempts) {
+        vector<int> local_mins = Multi_Search(new_object, init_attempts);
+        vector<int> neighborhood;
+        for (int local_min: local_mins) {
+            for (int lmfriend: getFriends(local_min)) {
+                neighborhood.push_back(lmfriend);
+            }
+        }
+        sort(neighborhood.begin(), neighborhood.end(), [&new_object, this](const int a, const int b) {
+            return distance(vertices[a].coordinates, vertices[new_object].coordinates) <
+                   distance(vertices[b].coordinates, vertices[new_object].coordinates);
+        });
+        for (int i = 0; i < l && i < neighborhood.size(); i++) {
+            addEdge(neighborhood[i], new_object);
+        }
+    }
+
+    vector<int> Complete_search(int q, int m) {
+        vector<pair<int,double>> distances;
+        for (int i = 0; i < numVertices-1; i++) {
+            distances.push_back(make_pair(i,distance(vertices[q].coordinates, vertices[i].coordinates)));
+        }
+
+        sort(distances.begin(), distances.end(),
+             [](const pair<int, double>& a, const pair<int, double>& b) {
+                 return a.second < b.second;
+             });
+
+        vector <int> nearest_points;
+        for (int i=0;i<m && i < distances.size();i++){
+            nearest_points.push_back(distances[i].first);
+        }
+        return nearest_points;
     }
 };
 
-double distance(const std::vector<double>& query1,const std::vector<double>& query2){
-    double dist = 0.0f;
-    for (int j = 0; j < query1.size(); j++) {
-        dist += (query1[j] - query2[j]) * (query1[j] - query2[j]);
-    }
-    dist = sqrt(dist);
-    return dist;
-}
-
-std::pair<std::vector<std::pair<double, int>>, double> nsw_knn_search(
-        const std::vector<Node>& graph,
-        const std::vector<double>& query,
-        int k,
-        int m) {
-
-    std::vector<std::pair<double, int>> result_queue;
-    std::vector<bool> visited_set(graph.size(), false);
-    std::mt19937 gen(time(nullptr));
-    std::uniform_int_distribution<int> dist(0, graph.size() - 1);
-
-    double hops = 0.0f;
-
-    for (int i = 0; i < m; i++) {
-        int entry_node = dist(gen);
-        double entry_dist = distance(query,graph[entry_node].get_value());
-
-        std::priority_queue<std::pair<double, int>> candidate_queue;
-        candidate_queue.push({entry_dist, entry_node});
-
-        std::vector<std::pair<double, int>> temp_result_queue;
-        while (!candidate_queue.empty()) {
-            auto [candidate_dist, candidate_idx] = candidate_queue.top();
-            candidate_queue.pop();
-
-            if (result_queue.size() >= k) {
-                double current_k_dist = result_queue.front().first;
-                if (candidate_dist > current_k_dist) {
-                    break;
-                }
-            }
-
-            for (int friend_node : graph[candidate_idx].get_neighborhood()) {
-                if (!visited_set[friend_node]) {
-                    visited_set[friend_node] = true;
-
-                    double friend_dist = distance(query,graph[friend_node].get_value());
-                    candidate_queue.push({friend_dist, friend_node});
-                    temp_result_queue.push_back({friend_dist, friend_node});
-                    hops += 1.0f;
-                }
-            }
-        }
-        result_queue.insert(result_queue.end(), temp_result_queue.begin(), temp_result_queue.end());
-    }
-
-    std::partial_sort(result_queue.begin(), result_queue.begin() + k, result_queue.end());
-    auto average_hops = static_cast<double> (hops / m);
-    return {std::vector<std::pair<double, int>>(result_queue.begin(), result_queue.begin() + k), average_hops};
-}
-
-std::vector<Node> build_nsw_graph(const std::vector<std::vector<double>>& index_factors, int k,int m) {
-    std::vector<Node> graph;
-    for (int i = 0; i < index_factors.size(); i++) {
-        Node node(i, index_factors[i]);
-        std::vector<int> neighbors_indices;
-        if (i > k) {
-            auto [neighbors, hops] = nsw_knn_search(graph, node.get_value(), k, m);
-
-            for (const auto& neighbor : neighbors) {
-                neighbors_indices.push_back(neighbor.second);
-            }
-        } else {
-            neighbors_indices.resize(i);
-            for (int neighbors_index : neighbors_indices){
-                neighbors_indices[neighbors_index]=0;
-            }
-        }
-        for (int neighbor_index : neighbors_indices) {
-            if (std::find(graph[neighbor_index].get_neighborhood().begin(),graph[neighbor_index].get_neighborhood().end(), node.get_idx())!= graph[neighbor_index].get_neighborhood().end()) {
-            }
-            else{
-                node.add_to_neighborhood(neighbor_index);
-                graph[neighbor_index].add_to_neighborhood(node.get_idx());
-                }
-        }
-
-        graph.push_back(node);
-    }
-    return graph;
-}
-
-std::vector<int> Complete_search(std::vector<Node>& graph,
-                                 std::vector<double> query_factors,
-                                 int vert, int dim, int k) {
-    std::vector<std::pair<int,double>> distances;
-    for (int i = 0; i < vert; i++) {
-        double point_dist = distance(query_factors,graph[i].get_value());
-        distances.push_back(std::make_pair(i,point_dist));
-    }
-
-    sort(distances.begin(), distances.end(),
-         [](const std::pair<int, double>& a, const std::pair<int, double>& b) {
-             return a.second < b.second;
-         });
-
-    std::vector <int> nearest_points;
-    for (int i=0;i<k && i < distances.size();i++){
-        nearest_points.push_back(distances[i].first);
-    }
-    return nearest_points;
-}
-
-double calculatePrecision(const std::vector<int>& possible_results, const std::vector<int>& true_results) {
-    int true_positives = 0;
-    int false_positives = 0;
-
-    for (int result : possible_results) {
-        if (std::find(true_results.begin(), true_results.end(), result) != true_results.end()) {
-            true_positives++;
-        } else {
-            false_positives++;
-        }
-    }
-
-    if (true_positives + false_positives == 0) {
-        return 0.0;
-    }
-
-    return static_cast<double>(true_positives) / (true_positives + false_positives);
-}
-
-double calculateRecall(const std::vector<int>& possible_results, const std::vector<int>& true_results) {
-    int true_positives = 0;
-    int false_negatives = 0;
-
-    for (int result : true_results) {
-        if (std::find(possible_results.begin(), possible_results.end(), result) != possible_results.end()) {
-            true_positives++;
-        } else {
-            false_negatives++;
-        }
-    }
-
-    if (true_positives + false_negatives == 0) {
-        return 0.0;
-    }
-
-    return static_cast<double>(true_positives) / (true_positives + false_negatives);
-}
-
-std::vector<double> fill_random_point(int dim, int maximum){
-    std::uniform_int_distribution<int> dist2(0, maximum);
-    std::vector<double> query;
-    for (int i=0;i<dim;i++){
-        query.push_back(dist2(gen));
-    }
-    return query;
-}
-
-std::vector<std::vector<double>> fill_random_vector(int vert,int dim, int maximum){
-    std::uniform_int_distribution<int> dist2(0, maximum);
-    std::vector<std::vector<double>> index_factors;
-    for (int i=0;i<vert;i++){
-        index_factors.push_back(fill_random_point(dim,maximum));
-    }
-    return index_factors;
-}
-
-std::vector<int> output_results(std::vector<Node>& graph, std::vector<double>& query_factors, int k, int m){
-    auto results = nsw_knn_search(graph, query_factors, k, m);
-    std::vector<int> possible_results;
-    std::cout << "k-nearest neighbours: " << std::endl;
-    for (const auto& result : results.first) {
-        std::cout << result.first << " " << result.second << std::endl;
-        possible_results.push_back(result.second);
-    }
-    std::cout << "Average hops: " << results.second << std::endl;
-    return possible_results;
-}
-
-void print_degree_and_neighbors(std::vector<Node>& graph){
-    for(int i=0;i<graph.size();i++){
-        std::vector<int> neighborhood=graph[i].get_neighborhood();
-        std::cout<<i<<": degree= "<<neighborhood.size()<<", neighbors: ";
-        for (int j=0;j<neighborhood.size();j++){
-            std::cout<<neighborhood[j]<<", ";
-        }
-        std::cout<< std::endl;
-    }
-}
-
-void return_neighbors_to_file(std::vector<Node>& graph, std::string path){
-    std::ofstream myfile;
-    myfile.open(path);
-    for(int i=0;i<graph.size();i++) {
-        std::vector<int> neighborhood = graph[i].get_neighborhood();
-        myfile << i <<","<< neighborhood.size() << std::endl;
-    }
-    myfile.close();
-}
-
-void return_neighbors_to_file_and_combine(std::vector<Node>& graph, std::string path){
-    std::ofstream myfile;
-    myfile.open(path);
-    int gr=0;
-    double number=0.0f;
-    for(int i=0;i<graph.size();i++) {
-        number+= graph[i].get_neighborhood().size();
-        gr++;
-        if (gr=20){
-            number/=20;
-            myfile <<  number << std::endl;
-            number=0.0f;
-            gr=0;
-        }
-    }
-    myfile.close();
-}
-
 int main() {
-    int k = 20; // number of nearest neighbors
-    int m = 20; // start degree of vertex
-    int vert = 10000; //number of points
-    int dim = 10; //dimension of each point
-    int maximum=50000;//maximum point value
+    // Создаем граф с vert-вершинами в dim-мерном пространстве
+    int vert = 1000;
+    int dim = 2;
+    int l = 100; // Параметр (степень вершины при построении графа)
+    int m = 50; // Параметр (количество ближайших точек), размер очереди
+    int init_attempts = 100; // Параметр (количество точек, добавляемых на каждом шаге построения графа), число поисков
+    Graph graph(vert + 1, dim);
 
-    std::vector<double> query_factors= fill_random_point(dim,maximum);//query
-    std::vector<std::vector<double>> index_factors= fill_random_vector(vert,dim,maximum);//vectors for graph
-    std::vector<Node> graph = build_nsw_graph(index_factors, k, m);//built graph
+    vector<double> point;
+    srand(static_cast<unsigned int>(time(nullptr)));
+    for (int i=0;i<vert;i++){
+        point.clear();
+        for (int j=0;j<dim;j++){
+            int randomNumber = (rand() % (201)) - 100;
+            point.push_back(randomNumber);
+        }
+        graph.addVertex(point);
+        graph.Nearest_Neighbor_Add(i, l, init_attempts);
+    }
 
-    //std::vector<int> possible_results= output_results(graph, query_factors, k, m);
-    //print_degree_and_neighbors(graph);
-    std::string path="E:\\clion\\nsw2\\neighbors.csv";
-    return_neighbors_to_file(graph, path);
-    //return_neighbors_to_file_and_combine(graph, path);
-    // for precision and recall
-    //std::vector<int> true_results = Complete_search(graph,query_factors,vert,dim,k);
-    //double precision = calculatePrecision(possible_results, true_results);
-    //double recall = calculateRecall(possible_results, true_results);
-    //std::cout << "Precision: " << precision << std::endl;
-    //std::cout << "Recall: " << recall << std::endl;
+    vector<double> query;
+    for (int j=0;j<dim;j++){
+        int randomNumber = (rand() % (201)) - 100;
+        query.push_back(randomNumber);
+    }
+    graph.addVertex(query);
 
+    //for (int i = 0; i < vert; i++) {
+    //    graph.Nearest_Neighbor_Add(i, l, init_attempts);
+    //}
+
+    vector<int> true_results = graph.Complete_search(vert, m);
+    //cout << "First true m-nearest points:\n";
+    //for (int i=0;i<m && i < true_results.size();i++){ //
+    //    cout << i+1 << ": " << true_results[i] << "\n";
+    //}
+    int true_result = graph.Get_Best_Element(vert, true_results);
+    //cout << "The true nearest is: " << true_result << "\n";
+
+    //cout << "First m-nearest points:\n";
+    vector<int> results = graph.Multi_Search(vert, m);
+    //for (int i=0;i<m && i < results.size();i++){ //
+    //    cout << i+1 << ": " << results[i] << "\n";
+    //}
+    int result = graph.Get_Best_Element(vert, results);
+    //cout << "The nearest is: " << result << "\n";
+
+    int true_positive = 0;
+    int false_positive = 0;
+    int false_negative = 0;
+
+    for (int i = 0; i < m; ++i) {
+        if (find(results.begin(), results.end(), true_results[i]) != results.end()) {
+            true_positive++;
+        } else {
+            false_negative++;
+        }
+    }
+
+    false_positive = results.size() - true_positive;
+
+    double precision = static_cast<double>(true_positive) / (true_positive + false_positive);
+    double recall = static_cast<double>(true_positive) / (true_positive + false_negative);
+
+    cout << "Precision: " << precision << endl;
+    cout << "Recall: " << recall << endl;
     return 0;
 }
